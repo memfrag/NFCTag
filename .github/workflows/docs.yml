@@ -22,6 +22,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The runner's Xcode is typically older than a local one, and Swift 6
+      # strict concurrency diagnostics differ between compiler versions. Log it
+      # so a build failure here is easy to attribute.
+      - name: Show toolchain
+        run: xcodebuild -version && swift --version
+
       # CoreNFC has no native macOS SDK, so the docs must be built
       # against the iOS SDK rather than with `swift package`.
       - name: Build DocC archive

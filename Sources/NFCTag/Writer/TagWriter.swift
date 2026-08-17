@@ -127,15 +127,13 @@ extension TagWriter {
                 return
             }
 
-            // CoreNFC types carry no concurrency annotations, so the compiler
-            // cannot tell that these objects are handed over to this callback
-            // and never touched anywhere else. The session delivers callbacks
-            // on a single serial queue and the work below is the only consumer,
-            // so the region is broken explicitly here.
-            nonisolated(unsafe) let tagToWrite = detectedTag
-            nonisolated(unsafe) let session = session
+            // The session delivers callbacks on a single serial queue and the
+            // work below is the only consumer of these objects. See
+            // ``UncheckedSendable``.
+            let detected = UncheckedSendable((tag: detectedTag, session: session))
 
             Task {
+                let (tagToWrite, session) = detected.value
                 do {
                     try await session.connect(to: tagToWrite)
                 } catch {

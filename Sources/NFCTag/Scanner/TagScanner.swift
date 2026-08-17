@@ -214,15 +214,13 @@ extension TagScanner {
         // MARK: - Session Did Detect Tags
 
         func readerSession(_ session: NFCNDEFReaderSession, didDetect tags: [NFCNDEFTag]) {
-            // CoreNFC types carry no concurrency annotations, so the compiler
-            // cannot tell that these objects are handed over to this callback
-            // and never touched anywhere else. The session delivers callbacks
-            // on a single serial queue and the work below is the only consumer,
-            // so the region is broken explicitly here.
-            nonisolated(unsafe) let tags = tags
-            nonisolated(unsafe) let session = session
+            // The session delivers callbacks on a single serial queue and the
+            // work below is the only consumer of these objects. See
+            // ``UncheckedSendable``.
+            let detected = UncheckedSendable((tags: tags, session: session))
 
             Task {
+                let (tags, session) = detected.value
                 do {
                     try await readTags(tags, in: session)
                 } catch {
