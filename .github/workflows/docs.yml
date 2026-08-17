@@ -1,0 +1,73 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Allow the workflow to publish to GitHub Pages via OIDC.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let an in-progress deploy finish; queue at most one more.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # CoreNFC has no native macOS SDK, so the docs must be built
+      # against the iOS SDK rather than with `swift package`.
+      - name: Build DocC archive
+        run: |
+          xcodebuild docbuild \
+            -scheme NFCTag \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/derived-data"
+
+      - name: Transform for static hosting
+        run: |
+          ARCHIVE=$(find "$RUNNER_TEMP/derived-data" -name 'NFCTag.doccarchive' -type d | head -1)
+          xcrun docc process-archive transform-for-static-hosting "$ARCHIVE" \
+            --output-path _site \
+            --hosting-base-path NFCTag
+
+      # The archive root ships an index.html hardcoded to base path "/",
+      # which 404s under a project Pages site. Replace it with a redirect
+      # to the module page.
+      - name: Add root redirect
+        run: |
+          cat > _site/index.html <<'EOF'
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <title>NFCTag Documentation</title>
+              <meta http-equiv="refresh" content="0; url=/NFCTag/documentation/nfctag/">
+              <link rel="canonical" href="/NFCTag/documentation/nfctag/">
+            </head>
+            <body>
+              <a href="/NFCTag/documentation/nfctag/">NFCTag documentation</a>
+            </body>
+          </html>
+          EOF
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

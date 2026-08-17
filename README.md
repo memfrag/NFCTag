@@ -2,6 +2,10 @@
 
 A convenience package for iOS for scanning and writing NDEF NFC tags.
 
+## Documentation
+
+API documentation is available at [memfrag.github.io/NFCTag](https://memfrag.github.io/NFCTag/documentation/nfctag/).
+
 ## License
 
 NFCTag is released under the BSD Zero Clause license. See LICENSE file for details.
