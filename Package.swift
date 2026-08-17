@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "NFCTag",
     platforms: [
-        .iOS(.v17), .macOS(.v14)
+        .iOS(.v17)
     ],
     products: [
         .library(name: "NFCTag", targets: ["NFCTag"])
