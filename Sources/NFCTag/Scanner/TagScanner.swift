@@ -1,5 +1,4 @@
 import Foundation
-import Combine
 import CoreNFC
 import OSLog
 
@@ -9,7 +8,7 @@ public typealias TagStream = AsyncThrowingStream<Tag, Error>
 // MARK: - TagScanner
 
 /// Scans NFC NDEF tags.
-public class TagScanner {
+public final class TagScanner {
 
     private var session: NFCNDEFReaderSession?
 
@@ -96,7 +95,7 @@ public class TagScanner {
         self.sessionHandler = sessionHandler
 
         let tagPayloadStream = AsyncThrowingStream { continuation in
-            sessionHandler.continuation = continuation
+            sessionHandler.setContinuation(continuation)
         }
 
         guard NFCNDEFReaderSession.readingAvailable else {
@@ -120,7 +119,7 @@ public class TagScanner {
     // MARK: Clean Up
 
     private func cleanUp(error: Swift.Error? = nil) {
-        sessionHandler?.cleanUp(error: error)
+        sessionHandler?.finish(throwing: error)
         sessionHandler = nil
         session?.invalidate()
         session = nil
@@ -131,36 +130,40 @@ extension TagScanner {
 
     // MARK: - SessionHandler
 
-    class SessionHandler: NSObject, NFCNDEFReaderSessionDelegate {
+    /// Receives reader session callbacks on the session's private queue.
+    ///
+    /// `@unchecked Sendable` is warranted because every stored property is
+    /// either an immutable Sendable value or a lock guarded ``LockedBox``.
+    final class SessionHandler: NSObject, NFCNDEFReaderSessionDelegate, @unchecked Sendable {
 
         private let statusMessage: TagScannerMessage
 
-        fileprivate var continuation: TagStream.Continuation?
+        private let continuation = LockedBox<TagStream.Continuation>()
 
         init(statusMessage: TagScannerMessage) {
             self.statusMessage = statusMessage
             super.init()
         }
 
-        @available(*, unavailable)
-        private override init() {
-            fatalError("Not implemented")
-        }
-
         deinit {
-            cleanUp()
+            finish(throwing: nil)
         }
 
-        // MARK: Clean Up
+        func setContinuation(_ continuation: TagStream.Continuation) {
+            self.continuation.set(continuation)
+        }
 
-        fileprivate func cleanUp(error: Swift.Error? = nil) {
-            if let continuation {
-                self.continuation = nil
-                if let error {
-                    continuation.finish(throwing: error)
-                } else {
-                    continuation.finish()
-                }
+        // MARK: Finish
+
+        /// Finishes the stream, at most once.
+        func finish(throwing error: Swift.Error?) {
+            guard let continuation = continuation.take() else {
+                return
+            }
+            if let error {
+                continuation.finish(throwing: error)
+            } else {
+                continuation.finish()
             }
         }
 
@@ -195,28 +198,30 @@ extension TagScanner {
 
                 let tag = Tag(payloads)
                 session.alertMessage = statusMessage.didScanTagMessage(tag)
-                continuation?.yield(tag)
+                continuation.current?.yield(tag)
 
             } catch let error as TagScannerError {
                 dump(error)
                 session.invalidate(errorMessage: error.description)
-                if let continuation {
-                    self.continuation = nil
-                    continuation.finish(throwing: error)
-                }
+                finish(throwing: error)
             } catch {
                 dump(error)
                 session.invalidate(errorMessage: "Scan failed, try again.")
-                if let continuation {
-                    self.continuation = nil
-                    continuation.finish(throwing: error)
-                }
+                finish(throwing: error)
             }
         }
 
         // MARK: - Session Did Detect Tags
 
-        public func readerSession(_ session: NFCNDEFReaderSession, didDetect tags: [NFCNDEFTag]) {
+        func readerSession(_ session: NFCNDEFReaderSession, didDetect tags: [NFCNDEFTag]) {
+            // CoreNFC types carry no concurrency annotations, so the compiler
+            // cannot tell that these objects are handed over to this callback
+            // and never touched anywhere else. The session delivers callbacks
+            // on a single serial queue and the work below is the only consumer,
+            // so the region is broken explicitly here.
+            nonisolated(unsafe) let tags = tags
+            nonisolated(unsafe) let session = session
+
             Task {
                 do {
                     try await readTags(tags, in: session)
@@ -229,23 +234,20 @@ extension TagScanner {
 
         // MARK: - Session Did Detect NDEFs
 
-        public func readerSession(_ session: NFCNDEFReaderSession, didDetectNDEFs messages: [NFCNDEFMessage]) {
+        func readerSession(_ session: NFCNDEFReaderSession, didDetectNDEFs messages: [NFCNDEFMessage]) {
             // Not called.
         }
 
         // MARK: - Session Did Invalidate
 
-        public func readerSession(_ session: NFCNDEFReaderSession, didInvalidateWithError error: Error) {
+        func readerSession(_ session: NFCNDEFReaderSession, didInvalidateWithError error: Error) {
             Logger.scanner.trace("NFC reader session did invalidate with error: \(error.localizedDescription)")
-            if let continuation {
-                self.continuation = nil
-                continuation.finish(throwing: error)
-            }
+            finish(throwing: error)
         }
 
         // MARK: - Session Did Become Active
 
-        public func readerSessionDidBecomeActive(_ session: NFCNDEFReaderSession) {
+        func readerSessionDidBecomeActive(_ session: NFCNDEFReaderSession) {
             Logger.scanner.trace("NFC reader session did become active.")
         }
     }

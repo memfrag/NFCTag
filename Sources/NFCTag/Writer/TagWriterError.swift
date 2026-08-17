@@ -1,7 +1,7 @@
 import Foundation
 
 /// Error cases that may occur when ``TagWriter`` writes tags.
-public enum TagWriterError: Swift.Error, CustomStringConvertible {
+public enum TagWriterError: Swift.Error, CustomStringConvertible, Sendable {
     case tagNotSupported
     case tagNotWritable
     case invalidPayload

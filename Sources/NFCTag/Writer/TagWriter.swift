@@ -1,12 +1,11 @@
 import Foundation
-import Combine
 import CoreNFC
 import OSLog
 
 // MARK: - TagWriter
 
 /// Writes NFC NDEF tags.
-public class TagWriter {
+public final class TagWriter {
 
     private var session: NFCNDEFReaderSession?
 
@@ -50,23 +49,16 @@ public class TagWriter {
         let sessionHandler = SessionHandler(tag: tag, statusMessage: message)
         self.sessionHandler = sessionHandler
 
-        session = NFCNDEFReaderSession(
+        let session = NFCNDEFReaderSession(
             delegate: sessionHandler,
             queue: nil,
             invalidateAfterFirstRead: true
         )
-        session?.alertMessage = message.scanningMessage
+        self.session = session
+        session.alertMessage = message.scanningMessage
 
-        return try await withCheckedThrowingContinuation { [weak self] continuation in
-            guard let self,
-                  let session = self.session,
-                  let sessionHandler = self.sessionHandler else {
-                continuation.resume(throwing: TagWriterError.unexpectedError)
-                return
-            }
-
-            sessionHandler.continuation = continuation
-
+        return try await withCheckedThrowingContinuation { continuation in
+            sessionHandler.setContinuation(continuation)
             session.begin()
         }
     }
@@ -74,9 +66,12 @@ public class TagWriter {
     // MARK: Clean Up
 
     private func cleanUp() {
+        // Resuming here keeps a caller from awaiting forever if the writer is
+        // torn down before the session reports a result.
+        sessionHandler?.finish(throwing: TagWriterError.unexpectedError)
+        sessionHandler = nil
         session?.invalidate()
         session = nil
-        sessionHandler = nil
     }
 }
 
@@ -84,13 +79,17 @@ extension TagWriter {
 
     // MARK: - SessionHandler
 
-    class SessionHandler: NSObject, NFCNDEFReaderSessionDelegate {
+    /// Receives reader session callbacks on the session's private queue.
+    ///
+    /// `@unchecked Sendable` is warranted because every stored property is
+    /// either an immutable Sendable value or a lock guarded ``LockedBox``.
+    final class SessionHandler: NSObject, NFCNDEFReaderSessionDelegate, @unchecked Sendable {
 
         private let tag: Tag
 
         private let statusMessage: TagWriterMessage
 
-        var continuation: CheckedContinuation<Void, Error>?
+        private let continuation = LockedBox<CheckedContinuation<Void, Error>>()
 
         init(tag: Tag, statusMessage: TagWriterMessage) {
             self.tag = tag
@@ -98,90 +97,87 @@ extension TagWriter {
             super.init()
         }
 
-        @available(*, unavailable)
-        private override init() {
-            fatalError("Not implemented")
-        }
-
         deinit {
-            cleanUp()
+            finish(throwing: TagWriterError.unexpectedError)
         }
 
-        // MARK: Clean Up
+        func setContinuation(_ continuation: CheckedContinuation<Void, Error>) {
+            self.continuation.set(continuation)
+        }
 
-        fileprivate func cleanUp(error: Swift.Error? = nil) {
-            if let continuation {
-                self.continuation = nil
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
+        // MARK: Finish
+
+        /// Resumes the continuation, at most once.
+        func finish(throwing error: Swift.Error?) {
+            guard let continuation = continuation.take() else {
+                return
             }
-        }
-
-        // MARK: Succeed
-
-        private func succeed() {
-            cleanUp()
-        }
-
-        // MARK: Fail
-
-        private func fail(_ error: Swift.Error) {
-            cleanUp(error: error)
+            if let error {
+                continuation.resume(throwing: error)
+            } else {
+                continuation.resume()
+            }
         }
 
         // MARK: - Session Did Detect Tags
 
-        public func readerSession(_ session: NFCNDEFReaderSession, didDetect tags: [NFCNDEFTag]) {
+        func readerSession(_ session: NFCNDEFReaderSession, didDetect tags: [NFCNDEFTag]) {
 
             guard let detectedTag = tags.first else {
                 return
             }
 
+            // CoreNFC types carry no concurrency annotations, so the compiler
+            // cannot tell that these objects are handed over to this callback
+            // and never touched anywhere else. The session delivers callbacks
+            // on a single serial queue and the work below is the only consumer,
+            // so the region is broken explicitly here.
+            nonisolated(unsafe) let tagToWrite = detectedTag
+            nonisolated(unsafe) let session = session
+
             Task {
                 do {
-                    try await session.connect(to: detectedTag)
+                    try await session.connect(to: tagToWrite)
                 } catch {
                     dump(error)
                     session.restartPolling()
+                    return
                 }
 
                 do {
-                    try await detectedTag.verifyWritable()
-                    try await detectedTag.writeTag(tag)
+                    try await tagToWrite.verifyWritable()
+                    try await tagToWrite.writeTag(tag)
 
                     session.alertMessage = statusMessage.didWriteTagMessage(tag)
-                    succeed()
+                    finish(throwing: nil)
                 } catch let error as TagWriterError {
                     dump(error)
                     session.invalidate(errorMessage: error.description)
-                    fail(error)
+                    finish(throwing: error)
                 } catch {
                     dump(error)
                     session.invalidate(errorMessage: "Write failed, try again.")
-                    fail(error)
+                    finish(throwing: error)
                 }
             }
         }
 
         // MARK: - Session Did Detect NDEFs
 
-        public func readerSession(_ session: NFCNDEFReaderSession, didDetectNDEFs messages: [NFCNDEFMessage]) {
+        func readerSession(_ session: NFCNDEFReaderSession, didDetectNDEFs messages: [NFCNDEFMessage]) {
             // Not called.
         }
 
         // MARK: - Session Did Invalidate
 
-        public func readerSession(_ session: NFCNDEFReaderSession, didInvalidateWithError error: Error) {
+        func readerSession(_ session: NFCNDEFReaderSession, didInvalidateWithError error: Error) {
             Logger.writer.trace("Reader session did invalidate with error: \(error.localizedDescription)")
-            fail(error)
+            finish(throwing: error)
         }
 
         // MARK: - Session Did Become Active
 
-        public func readerSessionDidBecomeActive(_ session: NFCNDEFReaderSession) {
+        func readerSessionDidBecomeActive(_ session: NFCNDEFReaderSession) {
             Logger.writer.trace("Reader session did become active.")
         }
     }

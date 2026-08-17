@@ -1,7 +1,7 @@
 import Foundation
 
 /// Error cases that may occur when ``TagScanner`` scans tags.
-public enum TagScannerError: Swift.Error, CustomStringConvertible {
+public enum TagScannerError: Swift.Error, CustomStringConvertible, Sendable {
     case tagNotSupported
     case noNDEFRecordsFound
     case unexpectedError

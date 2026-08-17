@@ -1,4 +1,4 @@
-// swift-tools-version: 5.10
+// swift-tools-version: 6.0
 
 import PackageDescription
 
@@ -11,6 +11,6 @@ let package = Package(
         .library(name: "NFCTag", targets: ["NFCTag"])
     ],
     targets: [
-        .target(name: "NFCTag", dependencies: [])
+        .target(name: "NFCTag", dependencies: [], swiftSettings: [.swiftLanguageMode(.v6)])
     ]
 )

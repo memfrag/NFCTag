@@ -4,7 +4,7 @@ import Foundation
 ///
 /// > Note: Only URL and text payloads are supported.
 ///
-public struct Tag {
+public struct Tag: Sendable {
 
     /// The payloads contained in the NFC NDEF tag.
     ///

@@ -5,7 +5,7 @@ import CoreNFC
 ///
 /// > Note: Only URL and text payloads are supported.
 ///
-public enum TagPayload {
+public enum TagPayload: Sendable {
     case url(URL)
     case text(String, locale: Locale)
 }
