@@ -1,10 +1,36 @@
 # NFCTag
 
+[![Documentation](https://img.shields.io/badge/documentation-DocC-blue)](https://memfrag.github.io/NFCTag/documentation/nfctag/)
+[![Swift 6](https://img.shields.io/badge/Swift-6-orange)](https://swift.org)
+[![Platform](https://img.shields.io/badge/platform-iOS%2017%2B-lightgrey)](https://developer.apple.com/ios/)
+[![License](https://img.shields.io/badge/license-0BSD-green)](LICENSE)
+
 A convenience package for iOS for scanning and writing NDEF NFC tags.
 
 ## Documentation
 
-API documentation is available at [memfrag.github.io/NFCTag](https://memfrag.github.io/NFCTag/documentation/nfctag/).
+Full API documentation is published at
+**[memfrag.github.io/NFCTag](https://memfrag.github.io/NFCTag/documentation/nfctag/)**.
+
+Jump straight to a topic:
+
+- [Scanning Tags](https://memfrag.github.io/NFCTag/documentation/nfctag/scanningtags/)
+- [Writing Tags](https://memfrag.github.io/NFCTag/documentation/nfctag/writingtags/)
+- [`TagScanner`](https://memfrag.github.io/NFCTag/documentation/nfctag/tagscanner/)
+- [`TagWriter`](https://memfrag.github.io/NFCTag/documentation/nfctag/tagwriter/)
+
+## Installation
+
+Add the package to your `Package.swift`:
+
+```swift
+.package(url: "https://github.com/memfrag/NFCTag.git", from: "1.0.0")
+```
+
+## Requirements
+
+Swift 6 and iOS 17 or later. CoreNFC is unavailable on native macOS, so this
+package targets iOS only.
 
 ## License
 
